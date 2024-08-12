@@ -1,1 +1,1 @@
-find_sync_point
+self.swEnableConveyor.setStyleSheet("background-color : green")

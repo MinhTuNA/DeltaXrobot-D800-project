@@ -1,6 +1,5 @@
-import copy
-import math
-import time
+import sys
+import random
 
 from devices import *
 from constants import *
@@ -12,7 +11,7 @@ from PyQt5.QtWidgets import QLabel, QLineEdit
 from PyQt5.QtCore import Qt, QSettings, QPoint, QTimer
 from PyQt5.QtGui import QCursor, QMouseEvent
 from PyQt5.QtTest import QTest
-
+from PyQt5 import QtWidgets
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
 from PyQt5.QtCore import Qt, QTimer, QThread, QObject, QIODevice, pyqtSignal as Signal
 from PyQt5.QtWidgets import (
@@ -28,13 +27,15 @@ from PyQt5.QtWidgets import (
     QSpacerItem,
 )
 
-from PyQt5.QtGui import QPixmap, QImage, QPalette, QColor
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from widget import Ui_Mainwindows
 
 
-class StickyManager(QMainWindow):
-
+class MainWindow(QMainWindow, Ui_Mainwindows):
     def __init__(self):
         super().__init__()
+        self.setupUi(self) # tạo giao diện
         self.DeltaRobot = Robot(
             "auto", defaultCmd="IsDelta", revMsg="YesDelta", deviceName="D800"
         )
@@ -65,22 +66,14 @@ class StickyManager(QMainWindow):
         self.scurve.vel_start = self.VS
         self.scurve.vel_end = self.VE
 
-        # self.robots = [self.DeltaRobot]
-        self.initGcodeQueue = ["G28"]
-        self.gcodeQueue = []
-        self.subGcodeQueue = []
-
-        self.paths = []
-        self.currentPointIndex = -1
-        self.waitThreeOk = False
-        self.okCounter = 0
-
-        self.init()
-        self.initUI()
-
-        self.btExecute.clicked.connect(self.startExecute)
+        # Tạo biểu đồ và thêm vào giao diện
+        self.create_plot()
+        self.swExecute.clicked.connect(self.startExecute)
         self.swEnableConveyor.clicked.connect(self.onEnableConveyor)
-        self.EnableSensor.clicked.connect(self.enSensor)
+        self.count_board = 0
+        
+        self.init()
+        
         self.is_getting_position = False
         self.is_executing = False
         self.moving_to_first_point_time = 0
@@ -88,7 +81,7 @@ class StickyManager(QMainWindow):
         self.last_check_encoder_time = time.time()
         self.last_check_encoder_position = 0.0
         self.first_check_encoder = 0.0
-
+        
         self.scurve.max_vel = self.F
         self.scurve.set_moving_distance(
             self.cal_2point_dis(
@@ -103,49 +96,14 @@ class StickyManager(QMainWindow):
         self.scurve.start()
         self.move_to_first_point_time = self.scurve.t_target
         print(self.scurve.t_target)
-        # calculate time moving to 1st point
 
     def init(self):
-        self.gcodeQueue.clear()
-        self.initGcodeQueue.clear()
+        # self.gcodeQueue.clear()
+        # self.initGcodeQueue.clear()
         self.ready_point = ready_point.copy()
         self.conveyor_vel = conveyor_speed
         self.startTimers()
-
-    def initUI(self):
-        self.setWindowTitle("DeltaX - Applying Adhesive")
-        self.setGeometry(100, 100, 300, 200)
-
-        central_widget = QWidget(self)
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-
-        self.btExecute = QPushButton()
-        self.btExecute.setText("Execute")
-        self.btExecute.setFixedHeight(50)
-        self.swEnableConveyor = QPushButton()
-        self.swEnableConveyor.setText("CONV: START")
-        self.swEnableConveyor.setCheckable(True)
-        self.swEnableConveyor.setStyleSheet("background-color : lightgrey")
-        self.swEnableConveyor.setFixedHeight(50)
-
-        self.EnableSensor = QPushButton()
-        self.EnableSensor.setText("Enable Sensor")
-        self.EnableSensor.setCheckable(True)
-        self.EnableSensor.setStyleSheet("background-color : lightgrey")
-        self.EnableSensor.setFixedHeight(50)
-
-        self.lbTerminal = QLabel()
-        self.lbTerminal.setFixedHeight(30)
-        self.lbTerminal.setStyleSheet("color: green;")
-
-        vBox = QVBoxLayout()
-        vBox.addWidget(self.btExecute)
-        vBox.addWidget(self.swEnableConveyor)
-        vBox.addWidget(self.EnableSensor)
-        vBox.addWidget(self.lbTerminal)
-        main_layout.addLayout(vBox)
-
+        
     def onEnableConveyor(self):
         if self.swEnableConveyor.isChecked():
             self.swEnableConveyor.setStyleSheet("background-color : green")
@@ -157,26 +115,65 @@ class StickyManager(QMainWindow):
             self.swEnableConveyor.setText("CONV: START")
             self.Encoder.send_data("M310 1")
             self.Encoder.send_data("M317 T0")
-
+    
+    def execute(self):
+        self.send_gcode("M316 0")
+        self.send_gcode("M317 T500")
+    
     def startExecute(self):
         # firt_check_encoder = self.Encoder.send_data_for_check_encoder("M317")
         firt_check_encoder = 200
         gcodes, points3d = self.create_gcode_for_object()
         last_check_encoder = 210
+        for pointf in points3d:
+            print(pointf)
         for point_f in points3d:
             x, y, z, f = point_f
             # last_check_encoder = self.Encoder.send_data_for_check_encoder("M317")
-            last_check_encoder += 10
+            last_check_encoder += 5
             x += last_check_encoder - firt_check_encoder
             gcode = "G1 X" + str(x) + " Y" + str(y) + " Z" + str(z) + " F" + str(f)
             print(gcode)
+        self.count_board += 1
+        self.lcdNumber.display(self.count_board)
+    
+    def create_plot(self):
+        self.plot_widget = self.findChild(QtWidgets.QWidget, "plotWidget")
+        if self.plot_widget is None:
+            raise ValueError("plotWidget không được tìm thấy trong giao diện.")
+        
+        # Tạo Figure và Canvas từ matplotlib
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setParent(self.plot_widget)
+        
+        # Tạo một layout để chứa Canvas
+        layout = QVBoxLayout()
+        layout.addWidget(self.canvas)
+        self.plot_widget.setLayout(layout)
+        
+        # Vẽ biểu đồ
+        self.plot_data()
 
-    def enSensor(self):
-        self.send_gcode("M8 I3 B1 P0")
+    def plot_data(self):
+        point_offsets = [(40, 35), (35, 10), (20, 38), (15, 10), (5, 25)]
+        lines_offsets = [
+            [(50, 39), (50, 25), (28, 25)],
+            [(50, 10), (30, 10)]
+        ]
+        ax = self.figure.add_subplot(111)
+        # Vẽ các điểm
+        x, y = zip(*point_offsets)
+        ax.scatter(x, y, color='red', marker='o')
+        # vẽ các đường
+        for line in lines_offsets:
+            line_x, line_y = zip(*line)
+            ax.plot(line_x, line_y, color='blue', marker='o', linestyle='-')
+        ax.legend()
+        # Cập nhật canvas để hiển thị biểu đồ
+        self.canvas.draw()
+        
 
-    def execute(self):
-        self.send_gcode("M316 0")
-        self.send_gcode("M317 T500")
 
     def autoConnect(self):
         if self.status == STATUS.WAIT_CONNECTION:
@@ -222,7 +219,11 @@ class StickyManager(QMainWindow):
             self.last_check_encoder_time = current_time
             self.last_check_encoder_position = current_position
             print(f"speed conv: {self.conveyor_vel}")
-
+        elif data.find("I3 V0") > -1:
+            if self.is_executing == False:
+                
+                
+                self.startExecute()
         # for gcode in self.initGcodeQueue:
         #     print(gcode)
 
@@ -334,11 +335,8 @@ class StickyManager(QMainWindow):
             (p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2
         )
 
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    ins = StickyManager()
-    ins.show()
-
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec_())
