@@ -87,6 +87,7 @@ class StickyManager(QMainWindow):
         self.last_cycle_time = -CYCLE_TIME
         self.last_check_encoder_time = time.time()
         self.last_check_encoder_position = 0.0
+        self.first_check_encoder = 0.0
 
         self.scurve.max_vel = self.F
         self.scurve.set_moving_distance(
@@ -108,6 +109,7 @@ class StickyManager(QMainWindow):
         self.gcodeQueue.clear()
         self.initGcodeQueue.clear()
         self.ready_point = ready_point.copy()
+        self.conveyor_vel = conveyor_speed
         self.startTimers()
 
     def initUI(self):
@@ -126,13 +128,13 @@ class StickyManager(QMainWindow):
         self.swEnableConveyor.setCheckable(True)
         self.swEnableConveyor.setStyleSheet("background-color : lightgrey")
         self.swEnableConveyor.setFixedHeight(50)
-        
+
         self.EnableSensor = QPushButton()
         self.EnableSensor.setText("Enable Sensor")
         self.EnableSensor.setCheckable(True)
         self.EnableSensor.setStyleSheet("background-color : lightgrey")
         self.EnableSensor.setFixedHeight(50)
-        
+
         self.lbTerminal = QLabel()
         self.lbTerminal.setFixedHeight(30)
         self.lbTerminal.setStyleSheet("color: green;")
@@ -155,17 +157,26 @@ class StickyManager(QMainWindow):
             self.swEnableConveyor.setText("CONV: START")
             self.Encoder.send_data("M310 1")
             self.Encoder.send_data("M317 T0")
-            
+
     def startExecute(self):
-        for i in self.create_gcode_for_object():
-            self.send_gcode(i)
-        
+        # firt_check_encoder = self.Encoder.send_data_for_check_encoder("M317")
+        firt_check_encoder = 200
+        gcodes, points3d = self.create_gcode_for_object()
+        last_check_encoder = 210
+        for point_f in points3d:
+            x, y, z, f = point_f
+            # last_check_encoder = self.Encoder.send_data_for_check_encoder("M317")
+            last_check_encoder += 10
+            x += last_check_encoder - firt_check_encoder
+            gcode = "G1 X" + str(x) + " Y" + str(y) + " Z" + str(z) + " F" + str(f)
+            print(gcode)
+
     def enSensor(self):
         self.send_gcode("M8 I3 B1 P0")
-    
+
     def execute(self):
         self.send_gcode("M316 0")
-        self.send_gcode("M317 T1000")
+        self.send_gcode("M317 T500")
 
     def autoConnect(self):
         if self.status == STATUS.WAIT_CONNECTION:
@@ -235,7 +246,8 @@ class StickyManager(QMainWindow):
         points = []
         for off in point_offsets:
             (x, y) = off
-            # tính tọa độ x = x + khoảng cách băng tải di chuyển
+            # tính tọa độ x = x + khoảng cách vật đã di chuyển sau thời gian di chuyển cánh tay
+            # từ vị trí hiện tại đến vị trí đích
             x += self.conveyor_vel * t / 1000
             points.append([board_pos[0] + x, board_pos[1] - y])
         lines = []
@@ -249,12 +261,13 @@ class StickyManager(QMainWindow):
                 line.append([board_pos[0] + x, board_pos[1] - y])
             lines.append(line)
         print("pointsafrec: ", points, lines)
-        return points, lines
+        return points, lines  # trả về mảng sau khi tính tọa độ
 
     def create_gcode_for_object(self):
         points_2d, lines_2d = self.points_after_recognize(self.scurve.t_target)
         points_3d = []
         gcodes = []
+        points_3d_f = []
         point_num = points_2d.__len__()
         is_first_point_in_line = True
 
@@ -265,7 +278,6 @@ class StickyManager(QMainWindow):
             points_3d.append([x, y, z_safe])
 
         self.ready_point = points_3d[0]
-        points_3d.pop(0)
         # print("points_3d: ",points_3d)
 
         for line in lines_2d:
@@ -284,67 +296,11 @@ class StickyManager(QMainWindow):
 
         for id, p in zip(range(points_3d.__len__()), points_3d):
             x, y, z = p
-
-            if id == 0:
-                pass
-            else:
-                current_f = FEED_RATE
-
-                if z == z_exe and point_num < 0:
-                    if is_first_point_in_line:
-                        is_first_point_in_line = False
-                    else:
-                        current_f = line_speed
-                else:
-                    is_first_point_in_line = True
-
-                new_x, new_y = self.scurve.find_sync_point(
-                    points_3d[id - 1][0],
-                    points_3d[id - 1][1],
-                    points_3d[id - 1][2],
-                    x,
-                    y,
-                    z,
-                    (self.conveyor_vel),
-                    conveyor_angle,
-                    0,
-                )
-                new_x = round(new_x, 3)
-                new_y = round(new_y, 3)
-                points_3d[id] = [new_x, new_y, z]
-
-                dis = self.cal_2point_dis(points_3d[id - 1], points_3d[id])
-                self.scurve.max_vel = current_f
-                if self.scurve.vel_start > self.scurve.max_vel:
-                    self.scurve.vel_start = self.scurve.max_vel - 2
-                    self.scurve.vel_end = self.scurve.max_vel - 2
-                else:
-                    self.scurve.vel_start = VS
-                    self.scurve.vel_end = VE
-
-                self.scurve.set_moving_distance(dis)
-                self.scurve.start()
-
-                execute_time = self.scurve.t_target
-                point_execute_time += execute_time
-
-                for i in range(id + 1, points_3d.__len__()):
-                    points_3d[i][0] += (
-                        self.conveyor_vel
-                        * execute_time
-                        / 1000
-                        * math.cos(conveyor_angle)
-                    )
-                    points_3d[i][1] += (
-                        self.conveyor_vel
-                        * execute_time
-                        / 1000
-                        * math.sin(conveyor_angle)
-                    )
-
-            current_pos = points_3d[id]
             gcodes.append(
                 f"G1 X{points_3d[id][0]} Y{points_3d[id][1]} Z{points_3d[id][2]} F{current_f}"
+            )
+            points_3d_f.append(
+                [points_3d[id][0], points_3d[id][1], points_3d[id][2], current_f]
             )
             if z == z_exe and point_num >= 0:
                 point_num -= 1
@@ -356,29 +312,22 @@ class StickyManager(QMainWindow):
                 ] + self.conveyor_vel * point_delay / 1000 * math.sin(conveyor_angle)
                 x = round(x, 3)
                 y = round(y, 3)
-                current_pos = [x, y, z]
+                points_3d[id][0] = x
+                points_3d[id][1] = y
                 gcodes.append(f"G1 X{x} Y{y} Z{z} F{abs(self.conveyor_vel)}")
-
+                points_3d_f.append(
+                    [
+                        points_3d[id][0],
+                        points_3d[id][1],
+                        points_3d[id][2],
+                        abs(self.conveyor_vel),
+                    ]
+                )
                 point_execute_time += point_delay
 
-                for i in range(id + 1, points_3d.__len__()):
-                    points_3d[i][0] += (
-                        self.conveyor_vel
-                        * point_delay
-                        / 1000
-                        * math.cos(conveyor_angle)
-                    )
-                    points_3d[i][1] += (
-                        self.conveyor_vel
-                        * point_delay
-                        / 1000
-                        * math.sin(conveyor_angle)
-                    )
-
         gcodes.append(f"G1 X{self.ready_point[0]} Y{self.ready_point[1]} Z{z_safe}")
-        for gcode in points_3d:
-            print(gcode)
-        return gcodes
+
+        return gcodes, points_3d_f
 
     def cal_2point_dis(self, p1=[1, 2, 3], p2=[4, 5, 6]):
         return math.sqrt(

@@ -99,6 +99,30 @@ class Device(QObject):
             print(self.device_name + " >>? " + data)
             return False
 
+    def send_data_for_check_encoder(self, data='',timeout = 5):
+        if self.serial_device.isOpen():
+            print(self.device_name + " >> " + data)
+            if not data.endswith('\n'): 
+                data += '\n'
+            self.serial_device.write(data.encode())
+            print(data)
+            start_time = time.time()
+            while (time.time() - start_time) < timeout:
+                if self.serial_device.canReadLine():
+                    data_p = self.serial_device.readLine().data().decode()
+                    if data_p.startswith("P0:"):
+                        position = float(data[3:])
+                        print(f"position: {position}")
+                        return position
+                    else: 
+                        print("sai định dạng dữ liệu")
+                        return False
+            print(self.device_name + " >>? Không nhận được phản hồi trong thời gian chờ.")
+            return False
+        else:
+            print(self.device_name + " >>? " + data)
+            return False
+
     def check_connection(self):
         if self.is_connected == False:
             print(f'finding {self.device_name} port . . .')
