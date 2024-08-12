@@ -1,1 +1,0 @@
-self.swEnableConveyor.setStyleSheet("background-color : green")
