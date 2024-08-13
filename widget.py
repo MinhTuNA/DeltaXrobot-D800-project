@@ -53,6 +53,13 @@ class Ui_Mainwindows(object):
         self.label_2 = QtWidgets.QLabel(Mainwindows)
         self.label_2.setGeometry(QtCore.QRect(90, 380, 101, 41))
         self.label_2.setObjectName("label_2")
+        self.onSensor = QtWidgets.QPushButton(Mainwindows)
+        self.onSensor.setGeometry(QtCore.QRect(70, 450, 121, 41))
+        font = QtGui.QFont()
+        font.setFamily("Segoe UI")
+        font.setPointSize(14)
+        self.onSensor.setFont(font)
+        self.onSensor.setObjectName("onSensor")
 
         self.retranslateUi(Mainwindows)
         QtCore.QMetaObject.connectSlotsByName(Mainwindows)
@@ -64,3 +71,4 @@ class Ui_Mainwindows(object):
         self.label.setText(_translate("Mainwindows", "DeltaXrobotics"))
         self.swEnableConveyor.setText(_translate("Mainwindows", "Start Conv"))
         self.label_2.setText(_translate("Mainwindows", "complete"))
+        self.onSensor.setText(_translate("Mainwindows", "onSensor"))

@@ -93,7 +93,6 @@ class Device(QObject):
             if not data.endswith('\n'): 
                 data += '\n'
             self.serial_device.write(data.encode())
-            print(data)
             return True
         else:
             print(self.device_name + " >>? " + data)
